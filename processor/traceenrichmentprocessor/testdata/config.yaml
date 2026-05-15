@@ -1,0 +1,10 @@
+traceenrichment:
+  cache:
+    ttl: 30s
+    max_entries: 100000
+    cleanup_interval: 5s
+  container_id_attribute: container.id
+  tetragon_container_id_subpath: process.pod.container.id
+  enrichment_attributes: [trace_id, span_id, service.name]
+  miss_marker_attribute: correlation_miss
+  match_timestamp_skew: 500ms

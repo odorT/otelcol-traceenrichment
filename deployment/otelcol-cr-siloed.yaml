@@ -1,0 +1,123 @@
+apiVersion: opentelemetry.io/v1beta1
+kind: OpenTelemetryCollector
+metadata:
+  name: traceenrich-siloed
+  namespace: opentelemetry-operator-system
+spec:
+  mode: daemonset
+  tolerations:
+    - key: lab
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
+  nodeSelector:
+    agentpool: lab
+  securityContext:
+    runAsUser: 0
+  image: docker.io/odort/otelcol-traceenrich:0.1.2
+  serviceAccount: traceenrich-collector
+  volumes:
+    - name: tetragon-logs
+      hostPath:
+        path: /var/run/cilium/tetragon
+        type: Directory
+  volumeMounts:
+    - name: tetragon-logs
+      mountPath: /var/run/cilium/tetragon
+      readOnly: true
+  config:
+    extensions:
+      health_check: {}
+      zpages:
+        endpoint: 0.0.0.0:55679
+    receivers:
+      otlp:
+        protocols:
+          grpc:
+            endpoint: 0.0.0.0:4317
+          http:
+            endpoint: 0.0.0.0:4318
+      filelog/tetragon:
+        include:
+          - /var/run/cilium/tetragon/tetragon.log
+        start_at: beginning
+        operators:
+          - type: json_parser
+          - type: time_parser
+            parse_from: attributes.time
+            layout_type: gotime
+            layout: '2006-01-02T15:04:05.999999999Z07:00'
+    processors:
+      memory_limiter:
+        check_interval: 1s
+        limit_percentage: 75
+        spike_limit_percentage: 15
+      k8sattributes:
+        auth_type: serviceAccount
+        passthrough: false
+        extract:
+          metadata:
+            - k8s.namespace.name
+            - k8s.pod.name
+            - k8s.pod.uid
+            - k8s.node.name
+            - k8s.deployment.name
+            - k8s.container.name
+            - container.id
+        pod_association:
+          - sources:
+              - from: resource_attribute
+                name: k8s.pod.ip
+          - sources:
+              - from: resource_attribute
+                name: k8s.pod.uid
+          - sources:
+              - from: connection
+      resource/tetragon:
+        attributes:
+          - key: service.name
+            value: tetragon
+            action: upsert
+          - key: service.namespace
+            value: tetragon
+            action: upsert
+          - key: pipeline.mode
+            value: siloed
+            action: upsert
+      resource/traces:
+        attributes:
+          - key: pipeline.mode
+            value: siloed
+            action: upsert
+      batch:
+        send_batch_size: 1000
+        timeout: 5s
+      batch/logs:
+        send_batch_size: 200
+        send_batch_max_size: 300
+        timeout: 2s
+    exporters:
+      otlp/tempo:
+        endpoint: http://tempo.tempo:4317
+        tls:
+          insecure: true
+      otlphttp/loki:
+        endpoint: http://loki.logging:3100/otlp
+      debug:
+        verbosity: basic
+    service:
+      telemetry:
+        logs:
+          level: debug
+      extensions: [health_check, zpages]
+      pipelines:
+        traces:
+          receivers: [otlp]
+          processors: [memory_limiter, k8sattributes, resource/traces, batch]
+          exporters: [otlp/tempo, debug]
+
+        logs/security:
+          # traceenrichment processor intentionally absent — siloed mode
+          receivers: [filelog/tetragon]
+          processors: [memory_limiter, resource/tetragon, batch/logs]
+          exporters: [otlphttp/loki, debug]

@@ -1,0 +1,15 @@
+{
+  "name": "attack-app",
+  "version": "0.1.0",
+  "description": "Dissertation attack scenario service — cryptojacker and SSRF triggers with OTel auto-instrumentation",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node -r ./src/tracing.js src/index.js"
+  },
+  "dependencies": {
+    "@opentelemetry/auto-instrumentations-node": "0.76.0",
+    "@opentelemetry/exporter-trace-otlp-grpc": "0.218.0",
+    "@opentelemetry/sdk-node": "0.218.0",
+    "express": "5.2.1"
+  }
+}
